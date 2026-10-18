@@ -20,6 +20,7 @@
 <div id="stage" aria-live="polite">
 
   <div class="bg" id="bg"><img src="assets/ponkeror-summit.webp" alt=""></div>
+  <div class="rays" aria-hidden="true"></div>
   <div class="shade"></div>
 
   <!-- top bar -->
@@ -30,6 +31,10 @@
         <div class="brand-name">THE PONKEROR'S JEET TRACKER</div>
         <div class="status" id="status"><i></i><span>CONNECTING</span></div>
       </div>
+    </div>
+    <div class="meter" aria-label="Battle meter: buys versus sells, last 10 minutes">
+      <div class="meter-labels"><span class="k">KNIGHTS</span><span>BATTLE · 10 MIN</span><span class="j">JEETS</span></div>
+      <div class="meter-bar"><div class="meter-fill" id="meter-fill"></div><div class="meter-knob" id="meter-knob"></div></div>
     </div>
     <div class="stats">
       <div class="stat red"><b id="s-jeets">0</b><span>Jeets ponked today</span></div>
@@ -64,9 +69,12 @@
     <div class="slogan">PONK ALL JEETS<svg viewBox="0 0 60 40" aria-hidden="true"><use href="#bang"/></svg></div>
   </footer>
 
+  <canvas class="fx" id="fx" aria-hidden="true"></canvas>
+
   <!-- full-screen scenes -->
   <div class="scene" id="scene">
     <img id="scene-img" alt="">
+    <div class="scene-speed"></div>
     <div class="scene-flash"></div>
     <div class="scene-text">
       <div class="scene-title" id="scene-title"></div>
@@ -86,6 +94,7 @@
   </symbol>
 </svg>
 
+<script src="fx.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
