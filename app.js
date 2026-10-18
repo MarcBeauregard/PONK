@@ -369,15 +369,65 @@
     stage.classList.add(big ? 'shake-big' : 'shake');
   }
 
-  const HIT = { x: 1120, y: 425 };   // just in front of the Ponkeror
+  // The background render is 2000x1105, fitted to cover the 1920x1080 stage (see .world in style.css).
+  const FIT = { k: 0.9774, x: -17.4 };
+  const toStage = (x, y) => ({ x: x * FIT.k + FIT.x, y: y * FIT.k });
+
+  // The Ponkeror's forearm + bat is its own sprite, pivoting at the elbow (numbers from tools/cut-arm.py).
+  const ELBOW = toStage(600, 628);
+  const REACH = 713 * FIT.k;              // elbow to the end of the bat
+  const REST = -110.4;                    // direction of the bat at rest, in degrees
+  const WINDUP = -18, STRIKE = 92, FOLLOW = 112; // arm rotation for each beat of the swing
+  const polar = (deg, r) => ({ x: ELBOW.x + r * Math.cos(deg * Math.PI / 180), y: ELBOW.y + r * Math.sin(deg * Math.PI / 180) });
+  const HIT = polar(REST + STRIKE, REACH * 0.84); // where the barrel meets the jeet
   const SKY = () => ({ x: 1500 + Math.random() * 300, y: 90 + Math.random() * 90 }); // where jeets vanish
 
-  // the swing: a comic motion streak from the tip of his raised bat down onto the jeet
-  const HAND = { x: 545, y: 455 }, REACH = 520;
-  const arcPt = (deg) => [HAND.x + REACH * Math.cos(deg * Math.PI / 180), HAND.y + REACH * Math.sin(deg * Math.PI / 180)];
-  const [sx, sy] = arcPt(-114), [ex, ey] = arcPt(-3);
-  const ARC = `M${sx} ${sy} A${REACH} ${REACH} 0 0 1 ${ex} ${ey}`;
-  const ARC_LEN = REACH * (111 * Math.PI / 180);
+  const arm = $('arm');
+  const armImg = arm.querySelector('img');
+  function armAngle() {
+    const m = new DOMMatrix(getComputedStyle(armImg).transform);
+    return Math.atan2(m.b, m.a) * 180 / Math.PI;
+  }
+  function armSet(frames, opts) {
+    const from = armAngle();
+    armImg.getAnimations().forEach((an) => an.cancel());
+    return armImg.animate([{ transform: `rotate(${from}deg)` }, ...frames], { fill: 'forwards', ...opts });
+  }
+  function windUp(speed) {
+    armSet([{ transform: `rotate(${WINDUP}deg)` }], { duration: 320 * speed, easing: 'cubic-bezier(.2,.8,.3,1)' });
+  }
+  // swing; resolves on the frame the bat lands. Then: hit-stop, follow-through, settle with a little overshoot.
+  async function strike(speed) {
+    const swingMs = 120, hold = 90, follow = 160, settle = 650 * Math.max(speed, 0.6);
+    const start = armAngle();
+    const swing = armSet([{ transform: `rotate(${STRIKE}deg)` }], { duration: swingMs, easing: 'cubic-bezier(.55,0,.9,.45)' });
+    // motion blur: two fading copies trail the arm through the swing
+    [16, 32].forEach((delay, i) => {
+      const g = armImg.cloneNode();
+      g.className = 'ghost';
+      g.style.opacity = i ? 0.16 : 0.32;
+      arm.insertBefore(g, armImg);
+      g.animate([{ transform: `rotate(${start}deg)` }, { transform: `rotate(${STRIKE}deg)` }],
+        { duration: swingMs, delay, easing: 'cubic-bezier(.55,0,.9,.45)', fill: 'both' })
+        .finished.then(() => g.animate([{ opacity: g.style.opacity }, { opacity: 0 }], { duration: 120, fill: 'forwards' }).finished)
+        .then(() => g.remove());
+    });
+    await swing.finished;
+    const T = follow + settle;
+    armImg.getAnimations().forEach((an) => an.cancel());
+    armImg.animate([
+      { transform: `rotate(${STRIKE}deg)`, easing: 'cubic-bezier(.2,.8,.3,1)' },
+      { transform: `rotate(${FOLLOW}deg)`, offset: follow / T, easing: 'cubic-bezier(.3,1.35,.5,1)' },
+      { transform: 'rotate(0deg)' },
+    ], { duration: T, delay: hold, fill: 'both' });
+  }
+
+  // the swing's motion streak follows the barrel's arc
+  const ARC_R = REACH * 0.9;
+  const arcPt = (deg) => polar(deg, ARC_R);
+  const A0 = arcPt(REST + WINDUP), A1 = arcPt(REST + STRIKE);
+  const ARC = `M${A0.x} ${A0.y} A${ARC_R} ${ARC_R} 0 0 1 ${A1.x} ${A1.y}`;
+  const ARC_LEN = ARC_R * ((STRIKE - WINDUP) * Math.PI / 180);
   function swoosh(layer, big) {
     const NS = 'http://www.w3.org/2000/svg';
     const svg = document.createElementNS(NS, 'svg');
@@ -394,7 +444,7 @@
     });
     return Promise.all(paths.map((p) => p.animate(
       [{ strokeDashoffset: ARC_LEN }, { strokeDashoffset: 0 }],
-      { duration: 130, easing: 'cubic-bezier(.6,0,1,.6)', fill: 'forwards' }).finished))
+      { duration: 120, easing: 'cubic-bezier(.55,0,.9,.45)', fill: 'forwards' }).finished))
       .then(() => {
         // the streak wipes away behind the swing
         paths.forEach((p) => p.animate([{ strokeDashoffset: 0, opacity: 1 }, { strokeDashoffset: -ARC_LEN, opacity: 0.2 }],
@@ -437,8 +487,10 @@
     });
     const approach = el.animate(frames, { duration: 800 * speed, easing: 'cubic-bezier(.25,.7,.35,1)', fill: 'forwards' });
 
-    // 2. the swing lands exactly as the jeet arrives
-    const swing = sleep(Math.max(0, 800 * speed - 130)).then(() => swoosh(layer, big));
+    // 2. he winds up, then swings so the bat lands exactly as the jeet arrives
+    const dur = 800 * speed;
+    setTimeout(() => windUp(speed), dur * 0.35);
+    const swing = sleep(Math.max(0, dur - 120)).then(() => Promise.all([swoosh(layer, big), strike(speed)]));
     await Promise.all([approach.finished, swing]);
 
     // 3. impact: hit-stop, squash, sparks, speed lines, PONK
@@ -478,18 +530,18 @@
       { transform: `translate(${(at.x + end.x) / 2 + 120}px,${Math.min(at.y, end.y) - 200}px) rotate(${spin * 0.65}deg) scale(.45)`, offset: 0.6 },
       { transform: `translate(${end.x}px,${end.y}px) rotate(${spin}deg) scale(.04)` },
     ];
-    const dur = (big ? 1200 : 950) * speed;
+    const flightMs = (big ? 1200 : 950) * speed;
     const ghosts = [1, 2].map((i) => {
       const g = el.cloneNode(true);
       g.classList.add('ghost');
       g.querySelector('.tag')?.remove();
       layer.insertBefore(g, el);
-      g.animate(flight, { duration: dur, delay: i * 45, easing: 'cubic-bezier(.3,.2,.4,1)', fill: 'both' })
+      g.animate(flight, { duration: flightMs, delay: i * 45, easing: 'cubic-bezier(.3,.2,.4,1)', fill: 'both' })
         .finished.then(() => g.remove());
       return g;
     });
     el.querySelector('.tag').animate([{ opacity: 1 }, { opacity: 0 }], { duration: 300, delay: 200, fill: 'forwards' });
-    await el.animate(flight, { duration: dur, easing: 'cubic-bezier(.3,.2,.4,1)', fill: 'forwards' }).finished;
+    await el.animate(flight, { duration: flightMs, easing: 'cubic-bezier(.3,.2,.4,1)', fill: 'forwards' }).finished;
     el.remove();
     ghosts.forEach((g) => setTimeout(() => g.remove(), 200));
     FX.sparkle(sky.x, sky.y, big ? 44 : 32, 38);

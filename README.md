@@ -25,7 +25,7 @@ Page 1920×1080 pensée pour tourner 24/7 en live stream. Chaque trade de $PONK 
 | Achat ≥ 3 SOL | Scène plein écran de la parade : **ALL HAIL SIR …** |
 | 6 min sans trade | Intermède PONK FM (DJ) ou STILL HOLDING (astronaute) |
 
-Animations : traînée du coup de bâton, effet de frappe (hit-stop, flash, lignes de vitesse, étincelles, poils, étoiles), l'ours qui part en orbite avec une traînée et disparaît en étincelle, confettis et pièces pour les gros achats, lettres qui s'écrasent à l'écran, barre de bataille acheteurs/vendeurs, compteurs qui roulent, neige et rayons de lumière en continu, armée qui sautille, bulle en machine à écrire.
+Animations : le bras du Ponkeror est un calque séparé qui pivote au coude (élan, frappe synchronisée avec l'impact, arrêt sur l'impact, retour avec rebond, léger balancement au repos ; découpe faite avec `tools/cut-arm.py`), traînée du coup de bâton, effet de frappe (hit-stop, flash, lignes de vitesse, étincelles, poils, étoiles), l'ours qui part en orbite avec une traînée et disparaît en étincelle, confettis et pièces pour les gros achats, lettres qui s'écrasent à l'écran, barre de bataille acheteurs/vendeurs, compteurs qui roulent, neige et rayons de lumière en continu, armée qui sautille, bulle en machine à écrire.
 
 La scène de parade utilise `assets/ponkeror-parade-bat.png` (le Ponkeror avec un bâton au lieu de l'épée) si le fichier existe, sinon l'image d'origine.
 
