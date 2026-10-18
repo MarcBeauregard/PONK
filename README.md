@@ -33,14 +33,13 @@ Elle repère aussi les **speed jeets** (vente moins de 10 min après l'achat) et
 
 ### Source des trades en direct
 
-| URL | Source | Couvre |
-|---|---|---|
-| `/` | PumpPortal (gratuit) | Trades sur la courbe pump.fun |
-| `/?helius=CLÉ` | RPC Solana via Helius (gratuit) | Tous les achats et ventes du CA, sur n'importe quel pool (PumpSwap, Raydium, Jupiter…) |
-| `/?rpc=URL` | N'importe quel RPC Solana | Pareil |
-| `/?ppkey=CLÉ` | PumpPortal avec clé API | Inclut PumpSwap |
+- **Sur Netlify avec la variable `HELIUS_KEY`** (recommandé) :
+  1. Un websocket Solana public signale chaque transaction qui touche le CA.
+  2. La fonction `netlify/functions/tx.mjs` (`/api/tx/<signature>`) la décode chez Helius avec la clé et renvoie seulement le trade.
+  3. La clé reste sur le serveur et le lien reste propre. Ça couvre tous les pools (courbe pump.fun, PumpSwap, Raydium, Jupiter…).
+- **Sans la variable :** la page utilise PumpPortal (gratuit, trades de la courbe pump.fun seulement).
 
-La clé reste dans l'URL d'OBS : elle n'est jamais dans le code publié. L'indicateur en haut à gauche montre la source (`LIVE · PUMPPORTAL` ou `LIVE · SOLANA RPC`). `?debug=1` affiche chaque message dans la console.
+L'indicateur en haut à gauche montre la source : `LIVE · SOLANA` ou `LIVE · PUMPPORTAL`. Avec `?debug=1`, chaque message s'affiche dans la console.
 
 ### Options d'URL
 
@@ -48,6 +47,7 @@ La clé reste dans l'URL d'OBS : elle n'est jamais dans le code publié. L'indic
 - `?mute=1` : sans son ; `?vol=0.3` : volume entre 0 et 1
 - `?swing=0.5` : seuil en SOL du gros PONK ; `?whale=3` : seuil en SOL de la parade
 - `?min=0.005` : ignore les trades plus petits (poussière, bots)
+- `?source=pumpportal` : force PumpPortal ; `?ws=wss://…` : un autre websocket Solana
 
 ### Pour le live stream (OBS)
 
@@ -59,7 +59,7 @@ Ajouter une source **Navigateur** en 1920×1080 avec l'URL de la page, et cocher
 python3 -m http.server 8000
 ```
 
-Puis ouvrir http://localhost:8000/?demo=1
+Puis ouvrir http://localhost:8000/?demo=1. Pour tester les fonctions avec de vrais trades : `netlify dev`, avec `HELIUS_KEY` dans l'environnement.
 
 ## Token
 

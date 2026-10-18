@@ -1,18 +1,19 @@
 // $PONK Jeet Tracker — live stream page.
-// Trades come straight from the browser, no server:
-//   default        PumpPortal websocket (free; pump.fun bonding-curve trades)
-//   ?helius=KEY    Solana RPC via Helius: every buy/sell of the mint, on any pool (PumpSwap, Raydium, Jupiter…)
-//   ?rpc=URL       same, with any other Solana RPC (https URL; its websocket is the same URL with wss)
-//   ?ppkey=KEY     PumpPortal with an API key (needed for its PumpSwap data)
-// Other options: ?demo=1  ?mute=1  ?vol=0.5  ?swing=0.5  ?whale=3  ?min=0.005  ?mint=<address>  ?debug=1
+// Where trades come from:
+//   on Netlify with HELIUS_KEY set: a public Solana websocket says "new transaction on the mint", and
+//     /api/tx/<sig> (netlify/functions/tx.mjs) decodes it with the key, which never reaches the browser.
+//     Covers every pool (pump.fun curve, PumpSwap, Raydium, Jupiter…).
+//   otherwise: PumpPortal websocket (free, pump.fun bonding-curve trades only).
+// Options: ?demo=1  ?mute=1  ?vol=0.5  ?swing=0.5  ?whale=3  ?min=0.005  ?source=pumpportal  ?ws=<wss url>  ?debug=1
 (() => {
   'use strict';
 
   const params = new URLSearchParams(location.search);
   const CFG = {
     mint: params.get('mint') || '4jjQjDRYd7xLcFMViRsz4GvtgU6gPZgbVaxN3Rq9pump',
-    ws: 'wss://pumpportal.fun/api/data' + (params.get('ppkey') ? `?api-key=${encodeURIComponent(params.get('ppkey'))}` : ''),
-    rpc: params.get('rpc') || (params.get('helius') ? `https://mainnet.helius-rpc.com/?api-key=${encodeURIComponent(params.get('helius'))}` : ''),
+    ws: 'wss://pumpportal.fun/api/data',
+    chainWs: params.get('ws') ? [params.get('ws')] : ['wss://api.mainnet-beta.solana.com', 'wss://solana-rpc.publicnode.com'],
+    source: params.get('source'),
     minSol: parseFloat(params.get('min') ?? '0.005'), // ignore dust trades below this
     debug: params.has('debug'),
     demo: params.has('demo'),
@@ -655,7 +656,7 @@
     let ws = null, lastMsgAt = 0, retry = 0, ka = 0;
     function open() {
       setStatus('', 'CONNECTING');
-      try { ws = new WebSocket(url); } catch { return again(); }
+      try { ws = new WebSocket(typeof url === 'function' ? url() : url); } catch { return again(); }
       ws.onopen = () => {
         retry = 0;
         lastMsgAt = Date.now();
@@ -696,68 +697,32 @@
     });
   }
 
-  // Solana RPC: watch every transaction that mentions the mint, then read who bought or sold from it
-  const WSOL = 'So11111111111111111111111111111111111111112';
-  const SUPPLY = 1e9;              // pump.fun tokens have a fixed 1B supply
-  const ATA_RENT = 0.00203928;     // SOL locked when a buyer's token account is created
+  // Solana: a public websocket reports each transaction that mentions the mint;
+  // our Netlify function decodes it (with the Helius key kept server-side).
   const pending = new Set();
-
-  async function rpcCall(method, params) {
-    const r = await fetch(CFG.rpc, {
-      method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
-    });
-    const j = await r.json();
-    if (j.error) throw new Error(j.error.message);
-    return j.result;
-  }
-  async function fetchTx(sig) {
-    for (let i = 0; i < 5; i++) { // the node can lag a moment behind the notification
-      try {
-        const tx = await rpcCall('getTransaction', [sig, { encoding: 'jsonParsed', maxSupportedTransactionVersion: 0, commitment: 'confirmed' }]);
-        if (tx) return tx;
-      } catch (err) { log('getTransaction', err.message); }
-      await sleep(700 * (i + 1));
-    }
-    return null;
-  }
-  function parseTx(tx, signature) {
-    if (!tx || !tx.meta || tx.meta.err) return null;
-    const keys = tx.transaction.message.accountKeys.map((k) => (typeof k === 'string' ? k : k.pubkey));
-    const signer = keys[0];
-    const pre = tx.meta.preTokenBalances || [], post = tx.meta.postTokenBalances || [];
-    const bal = (arr, mint) => arr.filter((b) => b.mint === mint && b.owner === signer)
-      .reduce((n, b) => n + (parseFloat(b.uiTokenAmount.uiAmountString) || 0), 0);
-    const tokBefore = bal(pre, CFG.mint), tokAfter = bal(post, CFG.mint);
-    const dTok = tokAfter - tokBefore;
-    if (Math.abs(dTok) < 1e-6) return null; // the signer's $PONK didn't move: not a trade
-    const dLamports = (tx.meta.postBalances[0] - tx.meta.preBalances[0] + tx.meta.fee) / 1e9;
-    const dSol = dLamports + (bal(post, WSOL) - bal(pre, WSOL));
-    const buy = dTok > 0;
-    let solAmount = Math.abs(dSol);
-    const newAccount = buy && !pre.some((b) => b.mint === CFG.mint && b.owner === signer);
-    if (newAccount) solAmount = Math.max(0, solAmount - ATA_RENT);
-    if (buy ? dSol > 0 : dSol < 0) return null; // tokens and SOL moved the same way: a transfer, not a swap
-    return {
-      signature, mint: CFG.mint, traderPublicKey: signer, txType: buy ? 'buy' : 'sell',
-      solAmount, tokenAmount: Math.abs(dTok), newTokenBalance: tokAfter,
-      marketCapSol: solAmount > 0 ? (solAmount / Math.abs(dTok)) * SUPPLY : undefined,
-    };
-  }
   async function onSignature(sig) {
     if (pending.has(sig) || seen.has(sig)) return;
     pending.add(sig);
     try {
-      const tr = parseTx(await fetchTx(sig), sig);
-      log('parsed', sig, tr);
-      if (tr) onTrade(tr);
+      for (let i = 0; i < 6; i++) {
+        const r = await fetch(`/api/tx/${sig}`).catch(() => null);
+        if (r && r.status === 200) {
+          const { trade } = await r.json();
+          log('decoded', sig, trade);
+          if (trade) onTrade(trade);
+          return;
+        }
+        if (r && r.status !== 202 && r.status < 500) return;
+        await sleep(800 * (i + 1));
+      }
     } finally {
       setTimeout(() => pending.delete(sig), 60000);
     }
   }
-  function connectRpc() {
+  function connectChain() {
+    let n = 0; // rotate public endpoints when one drops us
     feed({
-      url: CFG.rpc.replace(/^http/, 'ws'), label: 'SOLANA RPC', watchdogMs: 5 * 60e3,
+      url: () => CFG.chainWs[n++ % CFG.chainWs.length], label: 'SOLANA', watchdogMs: 5 * 60e3,
       keepAlive: JSON.stringify({ jsonrpc: '2.0', id: 'ka', method: 'getHealth' }), // providers drop idle sockets
       onOpen: (ws) => ws.send(JSON.stringify({
         jsonrpc: '2.0', id: 1, method: 'logsSubscribe', params: [{ mentions: [CFG.mint] }, { commitment: 'confirmed' }],
@@ -817,6 +782,10 @@
   }, CFG.reloadMs);
   audio();
   if (CFG.demo) { window.ponkTrade = onTrade; demo(); }
-  else if (CFG.rpc) connectRpc();
-  else connectPumpPortal();
+  else if (CFG.source === 'pumpportal') connectPumpPortal();
+  else {
+    // use the Solana feed when the site's decoder is configured, PumpPortal otherwise
+    fetch('/api/health').then((r) => (r.ok ? r.json() : {})).catch(() => ({}))
+      .then((h) => (h.ready ? connectChain() : connectPumpPortal()));
+  }
 })();
