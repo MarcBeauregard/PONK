@@ -2,7 +2,7 @@
 
 > **PONK all jeets.**
 
-Memecoin née du croisement de Bonk et Pepe. Mascotte : **The Ponkeror** ([@rejeantabarnak](https://x.com/rejeantabarnak)), empereur-grenouille en armure qui règle le cas des jeets à coups de bâton.
+Memecoin née du croisement de Bonk et Pepe. Mascotte : **The Ponkeror**, empereur-grenouille en armure qui règle le cas des jeets à coups de bâton.
 
 ## Les personnages
 
