@@ -14,7 +14,7 @@ Images dans [`assets/`](assets).
 
 ## Jeet Tracker (`index.html`)
 
-Page 1920×1080 pensée pour tourner 24/7 en live stream. Chaque trade de $PONK arrive en direct (websocket PumpPortal, sans clé API ni serveur) :
+Page 1920×1080 pensée pour tourner 24/7 en live stream. Chaque trade de $PONK arrive en direct, directement dans le navigateur, sans serveur :
 
 | Trade | À l'écran |
 |---|---|
@@ -31,11 +31,23 @@ La scène de parade utilise `assets/ponkeror-parade-bat.png` (le Ponkeror avec u
 
 Elle repère aussi les **speed jeets** (vente moins de 10 min après l'achat) et les **jeets repentants** (rachat après une vente). Les compteurs survivent à un rafraîchissement et repartent à zéro chaque jour.
 
+### Source des trades en direct
+
+| URL | Source | Couvre |
+|---|---|---|
+| `/` | PumpPortal (gratuit) | Trades sur la courbe pump.fun |
+| `/?helius=CLÉ` | RPC Solana via Helius (gratuit) | Tous les achats et ventes du CA, sur n'importe quel pool (PumpSwap, Raydium, Jupiter…) |
+| `/?rpc=URL` | N'importe quel RPC Solana | Pareil |
+| `/?ppkey=CLÉ` | PumpPortal avec clé API | Inclut PumpSwap |
+
+La clé reste dans l'URL d'OBS : elle n'est jamais dans le code publié. L'indicateur en haut à gauche montre la source (`LIVE · PUMPPORTAL` ou `LIVE · SOLANA RPC`). `?debug=1` affiche chaque message dans la console.
+
 ### Options d'URL
 
 - `?demo=1` : faux trades, pour tester ou faire des teasers
 - `?mute=1` : sans son ; `?vol=0.3` : volume entre 0 et 1
 - `?swing=0.5` : seuil en SOL du gros PONK ; `?whale=3` : seuil en SOL de la parade
+- `?min=0.005` : ignore les trades plus petits (poussière, bots)
 
 ### Pour le live stream (OBS)
 
