@@ -7,6 +7,8 @@ const WSOL = 'So11111111111111111111111111111111111111112';
 const SUPPLY = 1e9;            // pump.fun tokens have a fixed 1B supply
 const ATA_RENT = 0.00203928;   // SOL locked when a buyer's token account is created
 const SIG = /^[1-9A-HJ-NP-Za-km-z]{64,90}$/;
+// the Netlify variable may be named HELIUS_KEY, HELIUS or Helius
+export const heliusKey = () => (process.env.HELIUS_KEY || process.env.HELIUS || process.env.Helius || '').trim();
 
 const json = (status, body, cache) => new Response(JSON.stringify(body), {
   status,
@@ -55,7 +57,7 @@ async function getTransaction(sig, key) {
 }
 
 export default async (req, context) => {
-  const key = process.env.HELIUS_KEY;
+  const key = heliusKey();
   if (!key) return json(503, { error: 'HELIUS_KEY is not set' });
   const sig = context.params?.sig || new URL(req.url).pathname.split('/').pop();
   if (!SIG.test(sig)) return json(400, { error: 'bad signature' });
