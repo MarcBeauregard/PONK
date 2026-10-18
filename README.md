@@ -6,8 +6,10 @@ Memecoin née du croisement de Bonk et Pepe. Mascotte : **The Ponkeror** ([@reje
 
 ## Projets
 
-- **Jeet Tracker** — page web qui suit en direct les wallets qui vendent (les jeets) et les fait PONKER par The Ponkeror. *(en brainstorm)*
+- **Jeet Tracker** — page web qui suit en direct les wallets qui vendent (les jeets) et les fait PONKER par The Ponkeror. Pensé pour tourner 24/7 en live stream. *(en brainstorm)*
 
-## Statut
+## Token
 
-Repo fraîchement créé. Chaîne, contrat (CA) et liens officiels : à confirmer avec le dev.
+- Chaîne : Solana (lancé sur pump.fun)
+- CA : `4jjQjDRYd7xLcFMViRsz4GvtgU6gPZgbVaxN3Rq9pump`
+- pump.fun : https://pump.fun/coin/4jjQjDRYd7xLcFMViRsz4GvtgU6gPZgbVaxN3Rq9pump
