@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>$PONK — Jeet Tracker</title>
+<meta name="description" content="The Ponkeror's live Jeet Tracker. Buy and get knighted. Sell and get PONKED. PONK all jeets.">
+<meta name="theme-color" content="#0b0b0e">
+<link rel="icon" type="image/png" href="assets/ponkeror-avatar.png">
+<meta property="og:title" content="$PONK — Jeet Tracker">
+<meta property="og:description" content="Buy and get knighted. Sell and get PONKED. Live.">
+<meta property="og:image" content="assets/ponkeror-summit.webp">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bangers&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="stage" aria-live="polite">
+
+  <div class="bg" id="bg"><img src="assets/ponkeror-summit.webp" alt=""></div>
+  <div class="shade"></div>
+
+  <!-- top bar -->
+  <header class="top">
+    <div class="brand">
+      <img src="assets/ponkeror-avatar.png" alt="">
+      <div>
+        <div class="brand-name">THE PONKEROR'S JEET TRACKER</div>
+        <div class="status" id="status"><i></i><span>CONNECTING</span></div>
+      </div>
+    </div>
+    <div class="stats">
+      <div class="stat red"><b id="s-jeets">0</b><span>Jeets ponked today</span></div>
+      <div class="stat red"><b id="s-soljeet">0</b><span>SOL jeeted</span></div>
+      <div class="stat green"><b id="s-knights">0</b><span>New knights</span></div>
+      <div class="stat gold"><b id="s-mcap">—</b><span>Market cap</span></div>
+    </div>
+  </header>
+
+  <!-- speech bubble -->
+  <div class="bubble" id="bubble"><p id="bubble-text">PONK ALL JEETS.</p></div>
+
+  <!-- live feed -->
+  <aside class="feed">
+    <h2>LIVE FROM THE KINGDOM</h2>
+    <ol id="feed"></ol>
+  </aside>
+
+  <!-- hit layer: jeets fly in here -->
+  <div class="hits" id="hits"></div>
+
+  <!-- army -->
+  <div class="army">
+    <span class="army-label">THE ARMY</span>
+    <div class="army-row" id="army"></div>
+  </div>
+
+  <!-- ticker -->
+  <footer class="ticker">
+    <div class="ca"><span>CA</span><code id="ca"></code></div>
+    <div class="marquee"><div class="marquee-in" id="marquee"></div></div>
+    <div class="slogan">PONK ALL JEETS<svg viewBox="0 0 60 40" aria-hidden="true"><use href="#bang"/></svg></div>
+  </footer>
+
+  <!-- full-screen scenes -->
+  <div class="scene" id="scene">
+    <img id="scene-img" alt="">
+    <div class="scene-flash"></div>
+    <div class="scene-text">
+      <div class="scene-title" id="scene-title"></div>
+      <div class="scene-sub" id="scene-sub"></div>
+      <div class="scene-tag" id="scene-tag"></div>
+    </div>
+  </div>
+
+  <button class="sound" id="sound" type="button" hidden>Click to enable sound</button>
+</div>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="bang" viewBox="0 0 60 40">
+    <g fill="#e8322b"><rect x="6" y="2" width="9" height="24" rx="4.5" transform="rotate(-22 10 14)"/><circle cx="16" cy="34" r="5"/>
+    <rect x="25" y="0" width="9" height="24" rx="4.5"/><circle cx="29.5" cy="33" r="5"/>
+    <rect x="44" y="2" width="9" height="24" rx="4.5" transform="rotate(22 48 14)"/><circle cx="44" cy="34" r="5"/></g>
+  </symbol>
+</svg>
+
+<script src="app.js"></script>
+</body>
+</html>
