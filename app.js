@@ -4,7 +4,7 @@
 //     /api/tx/<sig> (netlify/functions/tx.mjs) decodes it with the key, which never reaches the browser.
 //     Covers every pool (pump.fun curve, PumpSwap, Raydium, Jupiter…).
 //   otherwise: PumpPortal websocket (free, pump.fun bonding-curve trades only).
-// Options: ?demo=1  ?mute=1  ?vol=0.5  ?swing=0.5  ?whale=3  ?min=0.005  ?source=pumpportal  ?ws=<wss url>  ?debug=1
+// Options: ?demo=1 (?demo=manual: no automatic trades)  ?mute=1  ?vol=0.5  ?swing=0.5  ?whale=3  ?min=0.005  ?source=pumpportal  ?ws=<wss url>  ?debug=1
 (() => {
   'use strict';
 
@@ -984,7 +984,10 @@
     location.reload();
   }, CFG.reloadMs);
   audio();
-  if (CFG.demo) { window.ponkTrade = onTrade; demo(); }
+  if (CFG.demo) {
+    window.ponkTrade = onTrade; // lets a recording script drive the page
+    if (params.get('demo') === 'manual') setStatus('demo', 'DEMO MODE'); else demo();
+  }
   else if (CFG.source === 'pumpportal') connectPumpPortal();
   else {
     // use the Solana feed when the site's decoder is configured, PumpPortal otherwise
