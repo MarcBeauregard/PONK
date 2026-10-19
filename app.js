@@ -432,6 +432,7 @@
     lastTradeAt = Date.now();
     DIAG.trades++; DIAG.lastTrade = lastTradeAt;
     if (tr.marketCapSol) { lastMcapSol = +tr.marketCapSol; renderMcap(); }
+    if (!CFG.demo) mcapFromTrade(tr);
     soonMcap();
 
     const now = Date.now();
@@ -838,7 +839,7 @@
         'PONK DEBUG', `source      ${DIAG.src}`, `/api/health ${DIAG.health}`, `socket      ${DIAG.socket}`, `server poll ${DIAG.poll}`,
         `messages    ${DIAG.msgs} (last ${ago(DIAG.lastMsg)})`, `tx seen     ${DIAG.sigs}`,
         `decoded     ${DIAG.decoded} trades, ${DIAG.notTrade} not trades, ${DIAG.apiErr} api errors`,
-        `on screen   ${DIAG.trades} (last ${ago(DIAG.lastTrade)})`, `market cap  ${mcapUsd ? '$' + compact(mcapUsd) + ' (dexscreener)' : lastMcapSol ? 'from trades' : 'none yet'}`,
+        `on screen   ${DIAG.trades} (last ${ago(DIAG.lastTrade)})`, `market cap  ${mcapUsd ? '$' + compact(mcapUsd) + ' (' + (DIAG.mcapSrc || 'saved') + ')' : lastMcapSol ? 'from trades' : 'none yet'}`,
         DIAG.err ? `last error  ${DIAG.err}` : '',
       ].filter(Boolean).join('\n');
     }, 1000);
@@ -969,24 +970,50 @@
 
   // Market cap from DexScreener (covers the pump.fun curve and PumpSwap). Straight from the browser,
   // or through /api/mcap (netlify/functions/mcap.mjs) if the browser can't reach it.
-  function pickMcap(j) {
-    const pairs = (j && j.pairs || []).filter((p) => p.baseToken && p.baseToken.address === CFG.mint);
-    if (!pairs.length) return 0;
-    pairs.sort((a, b) => ((b.liquidity && b.liquidity.usd) || 0) - ((a.liquidity && a.liquidity.usd) || 0));
-    return +(pairs[0].marketCap || pairs[0].fdv) || 0;
-  }
-  async function refreshMcap() {
-    let v = 0;
-    try {
-      v = pickMcap(await (await fetch(`https://api.dexscreener.com/latest/dex/tokens/${CFG.mint}`)).json());
-    } catch (err) { log('dexscreener', err.message); }
-    if (!v && !CFG.demo) {
-      try { v = +(await (await fetch('/api/mcap')).json()).marketCap || 0; } catch {}
-    }
-    if (!v) return;
+  // DexScreener lags a minute or more on fresh tokens, so live trades move the number between its updates;
+  // DexScreener only takes over again once the trades have gone quiet.
+  let supply = 1e9, liveMcapAt = 0;
+  function setMcap(v, live) {
+    if (!(v > 0)) return;
     mcapUsd = v;
+    if (live) liveMcapAt = Date.now();
     try { localStorage.setItem(STORE + ':mcap', String(v)); } catch {}
     renderMcap();
+  }
+  function pickPair(j) {
+    const pairs = (j && j.pairs || []).filter((p) => p.baseToken && p.baseToken.address === CFG.mint);
+    pairs.sort((a, b) => ((b.liquidity && b.liquidity.usd) || 0) - ((a.liquidity && a.liquidity.usd) || 0));
+    return pairs[0];
+  }
+  async function refreshMcap() {
+    let pair, v = 0;
+    try {
+      pair = pickPair(await (await fetch(`https://api.dexscreener.com/latest/dex/tokens/${CFG.mint}`, { cache: 'no-store' })).json());
+      v = pair ? +(pair.marketCap || pair.fdv) || 0 : 0;
+    } catch (err) { log('dexscreener', err.message); }
+    if (!v && !CFG.demo) {
+      try {
+        const j = await (await fetch('/api/mcap', { cache: 'no-store' })).json();
+        v = +j.marketCap || 0;
+        pair = { priceUsd: j.priceUsd, priceNative: j.priceNative };
+      } catch {}
+    }
+    if (pair && +pair.priceUsd > 0 && +pair.priceNative > 0) {
+      solUsd = pair.priceUsd / pair.priceNative;            // SOL price, from the same source
+      if (v) supply = v / pair.priceUsd;                     // tokens counted in the market cap
+    }
+    if (v && Date.now() - liveMcapAt > 60000) setMcap(v, false);
+    DIAG.mcapSrc = Date.now() - liveMcapAt > 60000 ? 'dexscreener' : 'live trades';
+  }
+  // live market cap from a trade: exact from PumpPortal (marketCapSol), estimated from a decoded swap otherwise
+  function mcapFromTrade(tr) {
+    if (!solUsd) return;
+    if (tr.pool && tr.marketCapSol) return setMcap(tr.marketCapSol * solUsd, true);
+    const sol = +tr.solAmount, tok = +tr.tokenAmount;
+    if (!(sol >= 0.02 && tok > 0)) return;                   // tiny swaps are mostly fees and tips
+    const fee = 1.01;                                        // the pool's cut sits inside the SOL amount
+    const price = tr.txType === 'buy' ? sol / tok / fee : (sol / tok) * fee;
+    setMcap(price * supply * solUsd, true);
   }
   let mcapTimer = 0;
   function soonMcap() { // a trade just moved the price: refresh a few seconds later, once
@@ -1034,7 +1061,7 @@
   showTab(0);
   refreshSol();
   setInterval(refreshSol, 5 * 60e3);
-  if (!CFG.demo) { refreshMcap(); setInterval(refreshMcap, 20000); }
+  if (!CFG.demo) { refreshMcap(); setInterval(refreshMcap, 15000); }
   setInterval(rollDay, 60e3);
   setTimeout(function reload() {
     if (busy || queue.length) return setTimeout(reload, 10000);

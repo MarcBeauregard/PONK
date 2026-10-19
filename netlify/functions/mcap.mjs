@@ -1,4 +1,4 @@
-// GET /api/mcap -> { marketCap, priceUsd, dexId } for $PONK from DexScreener, cached 20 s at the CDN.
+// GET /api/mcap -> { marketCap, priceUsd, dexId } for $PONK from DexScreener, cached 10 s at the CDN.
 // Fallback for browsers that can't call DexScreener directly.
 const MINT = process.env.PONK_MINT || '4jjQjDRYd7xLcFMViRsz4GvtgU6gPZgbVaxN3Rq9pump';
 
@@ -9,11 +9,11 @@ export default async () => {
       .sort((a, b) => ((b.liquidity && b.liquidity.usd) || 0) - ((a.liquidity && a.liquidity.usd) || 0));
     const p = pairs[0];
     if (!p) return new Response(JSON.stringify({ marketCap: 0 }), { status: 404, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
-    return new Response(JSON.stringify({ marketCap: +(p.marketCap || p.fdv) || 0, priceUsd: +p.priceUsd || 0, dexId: p.dexId }), {
+    return new Response(JSON.stringify({ marketCap: +(p.marketCap || p.fdv) || 0, priceUsd: +p.priceUsd || 0, priceNative: +p.priceNative || 0, dexId: p.dexId }), {
       headers: {
         'content-type': 'application/json',
-        'cache-control': 'public, max-age=15',
-        'netlify-cdn-cache-control': 'public, s-maxage=20, stale-while-revalidate=40',
+        'cache-control': 'no-store',
+        'netlify-cdn-cache-control': 'public, s-maxage=10',
       },
     });
   } catch (err) {
