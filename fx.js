@@ -65,6 +65,12 @@
     }
   }
 
+  // a glowing comet that curves from one point to another, shedding sparkles (links a hit to the feed)
+  function comet(x0, y0, x1, y1, color = '#ffc21a', life = 42) {
+    const cx = (x0 + x1) / 2, cy = Math.min(y0, y1) - 180 - Math.random() * 80;
+    add({ kind: 'comet', x: x0, y: y0, x0, y0, x1, y1, cx, cy, life, color });
+  }
+
   // ambient: slow snow and drifting gold motes, always alive
   for (let i = 0; i < 70; i++) {
     add({ kind: 'snow', x: rand(0, W), y: rand(0, H), vx: rand(-0.3, 0.3), vy: rand(0.3, 1.1), life: Infinity, r: rand(1, 3.2), a: rand(0.25, 0.7), sway: rand(0, 6) });
@@ -160,6 +166,20 @@
           ctx.fillStyle = '#ffffff'; ctx.fill();
           break;
         }
+        case 'comet': {
+          const k2 = 1 - (1 - k) ** 2, u = 1 - k2;
+          const nx = u * u * p.x0 + 2 * u * k2 * p.cx + k2 * k2 * p.x1;
+          const ny = u * u * p.y0 + 2 * u * k2 * p.cy + k2 * k2 * p.y1;
+          ctx.translate(nx - p.x, ny - p.y);
+          p.x = nx; p.y = ny;
+          if (Math.random() < 0.9) add({ kind: 'dot', x: nx, y: ny, vx: rand(-1, 1), vy: rand(-1, 1), drag: 0.92, life: rand(14, 24), r: rand(2, 4), color: p.color });
+          ctx.globalAlpha = k > 0.9 ? (1 - k) * 10 : 1;
+          ctx.shadowColor = p.color; ctx.shadowBlur = 24;
+          ctx.fillStyle = '#fff8ec';
+          ctx.beginPath(); ctx.arc(0, 0, 7, 0, 7); ctx.fill();
+          if (p.age + dt >= p.life) { sparkle(p.x1, p.y1, 30, 26); }
+          break;
+        }
         case 'ring': {
           ctx.globalAlpha = 1 - k;
           ctx.strokeStyle = p.color; ctx.lineWidth = 14 * (1 - k) + 1;
@@ -173,5 +193,5 @@
   }
   requestAnimationFrame(frame);
 
-  window.FX = { sparks, fur, stars, confetti, coins, sparkle, ring, hop };
+  window.FX = { sparks, fur, stars, confetti, coins, sparkle, ring, hop, comet };
 })();

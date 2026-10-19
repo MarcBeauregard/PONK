@@ -29,6 +29,26 @@ Animations : le bras du Ponkeror est un calque séparé qui pivote au coude (él
 
 La scène de parade utilise `assets/ponkeror-parade-bat.png` (le Ponkeror avec un bâton au lieu de l'épée) si le fichier existe, sinon l'image d'origine.
 
+Le panneau « Live » a des onglets qui alternent tout seuls :
+- **LIVE** : le fil en direct.
+- **SHAME** : le top 5 des jeets du jour.
+- **FAME** : le top 5 des acheteurs.
+- **STREAKS** : les séries d'achats ou de ventes en cours et les records du jour.
+
+Chaque ligne du fil reçoit une étiquette :
+- **JEET x3** : récidiviste ;
+- **RE-JEET** : a racheté puis revendu ;
+- **BOT** : achat et vente en moins de 20 s, grisé, pas de PONK et non compté ;
+- **NEW** ou **RETURNING KNIGHT** : premier achat ou retour ;
+- **WHALE** : épinglée en doré 30 s ;
+- **👑 DEV** : pour les adresses listées dans `DEV_WALLETS` en haut d'`app.js`.
+
+Autour du panneau :
+- **mode FRENZY** : 5 trades en 30 s ;
+- **indicateur de pression** : les 10 derniers trades ;
+- **comètes** : elles relient l'action à sa ligne ;
+- **répliques du Ponkeror** : il réagit aux séries, aux récidivistes, au dev et aux bots.
+
 Elle repère aussi les **speed jeets** (vente moins de 10 min après l'achat) et les **jeets repentants** (rachat après une vente). Les compteurs survivent à un rafraîchissement et repartent à zéro chaque jour.
 
 ### Source des trades en direct

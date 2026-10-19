@@ -22,11 +22,15 @@
     swingSol: parseFloat(params.get('swing') ?? '0.5'), // sells at or above this get the full swing
     whaleSol: parseFloat(params.get('whale') ?? '3'),   // buys at or above this get the parade
     speedJeetMs: 10 * 60e3,   // sold within 10 min of buying
+    botMs: 20e3,              // bought and sold (or sold and bought) within 20 s: a bot, not a person
     repentMs: 24 * 3600e3,    // bought back within 24 h of selling
     idleMs: 6 * 60e3,         // no trades for this long -> interlude scene
     watchdogMs: 15 * 60e3,    // no websocket message for this long -> reconnect
     reloadMs: 6 * 3600e3,     // periodic reload keeps a 24/7 page fresh
   };
+
+  // Wallets that get a 👑 DEV tag in the feed. Add the dev's address here.
+  const DEV_WALLETS = [];
 
   const $ = (id) => document.getElementById(id);
   const stage = $('stage');
@@ -63,6 +67,10 @@
   const fresh = () => ({
     day: todayKey(), jeets: 0, solJeeted: 0, knights: 0, solBought: 0,
     biggestJeet: null, fastestJeet: null, biggestBuy: null, feed: [], army: 0,
+    sells: {},                 // wallet -> sells today (repeat offenders)
+    shame: [], fame: [],       // top 5 sellers / buyers today, one line per wallet
+    streak: { t: '', n: 0 }, best: { buy: 0, sell: 0 },
+    pressure: [],              // last 10 trades: 'b' or 's'
   });
   let state = load();
   const wallets = new Map(loadWallets()); // wallet -> { b: lastBuyTs, s: lastSellTs }
@@ -145,24 +153,136 @@
     renderStats();
     renderMcap();
     renderMeter();
-    $('feed').innerHTML = state.feed.map(feedItem).join('');
+    $('feed').innerHTML = state.feed.slice(0, FEED_MAX).map(feedItem).join('');
+    renderPressure();
     renderArmy();
     renderMarquee();
   }
+  const FEED_MAX = 5;
   function feedItem(e) {
     const sell = e.type === 'sell';
     const label = e.label || (sell ? 'GOT PONKED' : 'JOINED THE ARMY');
-    return `<li class="${sell ? 'sell' : 'buy'}">
+    const cls = [sell ? 'sell' : 'buy', e.bot && 'bot', e.dev && 'dev', e.tier === 'whale' && 'whale'].filter(Boolean).join(' ');
+    const badge = e.badge ? `<span class="badge ${e.badgeCls || ''}">${esc(e.badge)}</span>` : '';
+    return `<li class="${cls}">
       <img src="assets/${sell ? 'jeet-bear.png' : 'ponk-avatar.png'}" alt="">
-      <div class="t"><code>${esc(short(e.w))}</code><small>${esc(label)}</small></div>
+      <div class="t"><code>${esc(short(e.w))}</code>${badge}<small>${esc(label)}</small></div>
       <div class="amt">${sell ? '-' : '+'}${sol(e.sol)} SOL</div></li>`;
   }
   function pushFeed(e) {
     state.feed.unshift(e);
-    state.feed.length = Math.min(state.feed.length, 6);
+    state.feed.length = Math.min(state.feed.length, FEED_MAX);
     const ol = $('feed');
     ol.insertAdjacentHTML('afterbegin', feedItem(e));
-    while (ol.children.length > 6) ol.lastElementChild.remove();
+    while (ol.children.length > FEED_MAX) ol.lastElementChild.remove();
+    if (e.tier === 'whale') pinWhale(e);
+  }
+  // a whale buy stays pinned, glowing, at the top of the feed for 30 s
+  let pinTimer = 0;
+  function pinWhale(e) {
+    $('feed-pin').innerHTML = feedItem({ ...e, badge: 'WHALE', badgeCls: 'new' });
+    $('feed-pin').parentElement.classList.add('pinned');
+    clearTimeout(pinTimer);
+    pinTimer = setTimeout(() => { $('feed-pin').innerHTML = ''; $('feed-pin').parentElement.classList.remove('pinned'); }, 30000);
+  }
+
+  // ---------- hall of shame / fame, streaks, pressure ----------
+  function bump(list, entry) { // keep each wallet once, best amount, top 5
+    const i = list.findIndex((x) => x.w === entry.w);
+    if (i >= 0) { if (list[i].sol >= entry.sol) return; list.splice(i, 1); }
+    list.push(entry);
+    list.sort((a, b) => b.sol - a.sol);
+    list.length = Math.min(list.length, 5);
+  }
+  function boardRow(x, n, sell) {
+    const sub = sell
+      ? (x.held != null && x.held < 864e5 ? `held ${duration(x.held)}` : x.full ? 'sold everything' : 'paper hands')
+      : (n === 0 ? 'royal knight' : 'knight');
+    return `<li style="--n:${n}"><img src="assets/${sell ? 'jeet-bear.png' : 'ponk-avatar.png'}" alt="">
+      <div class="t"><code>${esc(short(x.w))}</code><small>${n === 0 && sell ? 'KING JEET · ' : ''}${esc(sub)}</small></div>
+      <div class="amt">${sell ? '-' : '+'}${sol(x.sol)}</div></li>`;
+  }
+  function renderBoards() {
+    $('shame').innerHTML = state.shame.length ? state.shame.map((x, n) => boardRow(x, n, true)).join('')
+      : '<li class="empty">No jeets yet today. Suspicious.</li>';
+    $('fame').innerHTML = state.fame.length ? state.fame.map((x, n) => boardRow(x, n, false)).join('')
+      : '<li class="empty">The army awaits its first knight.</li>';
+    const st = state.streak, kind = st.t === 'buy' ? 'buy' : 'sell';
+    $('streaks').innerHTML = `
+      <div class="streak-now ${kind}"><b>${st.n || 0}</b><span>${st.t ? (st.t === 'buy' ? 'BUYS' : 'SELLS') + '<br>IN A ROW' + (st.n >= 5 ? ' 🔥' : '') : 'WAITING FOR<br>THE FIRST TRADE'}</span></div>
+      <div class="streak-grid">
+        <div><b style="color:var(--green)">${state.best.buy}</b><span>Best buy streak</span></div>
+        <div><b style="color:#ff6b5e">${state.best.sell}</b><span>Best sell streak</span></div>
+        <div><b style="color:var(--green)">${sol(state.solBought)}</b><span>SOL bought</span></div>
+        <div><b style="color:#ff6b5e">${sol(state.solJeeted)}</b><span>SOL jeeted</span></div>
+      </div>`;
+  }
+  function renderPressure() {
+    $('chips').innerHTML = state.pressure.map((t) => `<i class="${t}">${t === 'b' ? '▲' : '▼'}</i>`).join('');
+  }
+
+  // tabs rotate: LIVE most of the time, the boards in between
+  const TABS = [
+    { id: 'live', ms: 20000 },
+    { id: 'shame', ms: 9000 },
+    { id: 'fame', ms: 9000 },
+    { id: 'streaks', ms: 8000, has: () => state.jeets + state.knights > 0 },
+  ];
+  let tabIdx = 0;
+  function showTab(i) {
+    tabIdx = i;
+    const t = TABS[i];
+    if (t.id !== 'live') renderBoards();
+    document.querySelectorAll('#tabs span').forEach((el) => {
+      el.classList.remove('on');
+      if (el.dataset.tab === t.id) { el.style.setProperty('--ms', t.ms + 'ms'); void el.offsetWidth; el.classList.add('on'); }
+    });
+    document.querySelectorAll('.view').forEach((v) => v.classList.toggle('on', v.dataset.view === t.id));
+    setTimeout(() => {
+      let n = (tabIdx + 1) % TABS.length;
+      while (TABS[n].has && !TABS[n].has()) n = (n + 1) % TABS.length;
+      showTab(n);
+    }, t.ms);
+  }
+
+  // the Ponkeror reacts to what happens in the feed (at most one line every 6 s)
+  let quipAt = 0;
+  function quip(text) {
+    const now = Date.now();
+    if (now - quipAt < 6000) return;
+    quipAt = now;
+    say(text);
+  }
+
+  // frenzy: 5+ trades inside 30 s lights the panel up
+  const arrivals = [];
+  let frenzyTimer = 0;
+  function checkFrenzy(now) {
+    arrivals.push(now);
+    while (arrivals.length && now - arrivals[0] > 30000) arrivals.shift();
+    if (arrivals.length < 5) return;
+    const panel = $('feed-panel');
+    if (!panel.classList.contains('frenzy')) quip('FRENZY! Hold the line, knights!');
+    panel.classList.add('frenzy');
+    clearTimeout(frenzyTimer);
+    frenzyTimer = setTimeout(() => panel.classList.remove('frenzy'), 20000);
+  }
+
+  // a comet flies from where the action happened to its line in the feed
+  function cometToFeed(e) {
+    const k = parseFloat(getComputedStyle(stage).getPropertyValue('--k')) || 1;
+    const s = stage.getBoundingClientRect();
+    const toStage = (r) => ({ x: (r.left - s.left + 40) / k, y: (r.top - s.top + r.height / 2) / k });
+    const liveOn = TABS[tabIdx].id === 'live';
+    const target = liveOn && $('feed').firstElementChild ? $('feed').firstElementChild : $('tabs');
+    const to = toStage(target.getBoundingClientRect());
+    let from;
+    if (e.type === 'sell') from = { x: 860, y: 320 };
+    else {
+      const last = $('army').lastElementChild;
+      from = last ? toStage(last.getBoundingClientRect()) : { x: 120, y: 990 };
+    }
+    FX.comet(from.x, from.y, to.x, to.y, e.type === 'sell' ? '#ff6b5e' : '#6fd83a');
   }
   const ARMY_MAX = 34;
   const soldier = (i) => `<img src="assets/ponk-avatar.png" alt="" style="--i:${i}">`;
@@ -318,40 +438,89 @@
     const amount = +tr.solAmount || 0;
     const mem = wallets.get(w) || {};
     const e = { type: tr.txType, w, sol: amount, at: now };
+    e.dev = DEV_WALLETS.includes(w);
+    // a buy and a sell from the same wallet seconds apart is a bot (sandwich/MEV), not a person
+    e.bot = !e.dev && (e.type === 'sell' ? mem.b && now - mem.b <= CFG.botMs : mem.s && now - mem.s <= CFG.botMs);
+
+    if (e.bot) {
+      e.label = 'NOT EVEN WORTH THE BAT';
+      e.badge = 'BOT'; e.badgeCls = 'bot';
+      mem[e.type === 'sell' ? 's' : 'b'] = now;
+      wallets.set(w, mem);
+      pushFeed(e);
+      if (Math.random() < 0.3) quip('A bot. Not even worth the bat.');
+      save();
+      return; // bots don't count, don't get ponked, don't join the army
+    }
 
     if (e.type === 'sell') {
       const fullExit = tr.newTokenBalance !== undefined && +tr.newTokenBalance < 1;
       const held = mem.b ? now - mem.b : Infinity;
+      const count = (state.sells[w] || 0) + 1;
+      state.sells[w] = count;
       e.tier = fullExit ? 'mega' : amount >= CFG.swingSol ? 'swing' : 'tap';
-      if (held <= CFG.speedJeetMs) e.label = `SPEED JEET · held ${duration(held)}`;
+      if (e.dev) e.label = 'THE DEV SOLD';
+      else if (mem.rp) e.label = 'RE-JEET · REPENTED, THEN JEETED AGAIN';
+      else if (held <= CFG.speedJeetMs) e.label = `SPEED JEET · held ${duration(held)}`;
       else if (fullExit) e.label = 'SOLD EVERYTHING';
       else e.label = 'PAPER HANDS';
+      if (e.dev) { e.badge = '👑 DEV'; e.badgeCls = 'dev'; }
+      else if (mem.rp) { e.badge = 'RE-JEET'; e.badgeCls = 're'; }
+      else if (count >= 2) { e.badge = `JEET x${count}`; e.badgeCls = 'x'; }
+      if (count === 3) quip(`${short(w)} again?! Third time today.`);
       state.jeets++;
       state.solJeeted += amount;
       if (!state.biggestJeet || amount > state.biggestJeet.sol) state.biggestJeet = { w, sol: amount };
       if (held <= CFG.speedJeetMs && (!state.fastestJeet || held < state.fastestJeet.ms)) state.fastestJeet = { w, ms: held };
+      bump(state.shame, { w, sol: amount, held: Number.isFinite(held) ? held : null, full: fullExit });
+      if (Object.keys(state.sells).length > 2000) state.sells = {};
       mem.s = now;
+      mem.rp = false;
     } else {
       const repented = mem.s && now - mem.s <= CFG.repentMs;
+      const first = !mem.b && !mem.s;
       e.tier = amount >= CFG.whaleSol ? 'whale' : 'knight';
-      e.label = repented ? 'JEET REPENTED. FORGIVEN… FOR NOW' : amount >= CFG.whaleSol ? 'KNIGHTED BY THE EMPEROR' : 'JOINED THE ARMY';
+      if (e.dev) e.label = 'THE DEV IS BUYING';
+      else if (repented) e.label = 'JEET REPENTED. FORGIVEN… FOR NOW';
+      else if (amount >= CFG.whaleSol) e.label = 'KNIGHTED BY THE EMPEROR';
+      else if (first) e.label = 'NEW KNIGHT';
+      else e.label = 'RETURNING KNIGHT';
+      if (e.dev) { e.badge = '👑 DEV'; e.badgeCls = 'dev'; quip('The dev is buying. Respect.'); }
+      else if (first) { e.badge = 'NEW'; e.badgeCls = 'new'; }
       state.knights++;
       state.solBought += amount;
       if (!state.biggestBuy || amount > state.biggestBuy.sol) state.biggestBuy = { w, sol: amount };
+      bump(state.fame, { w, sol: amount });
       mem.b = now;
+      if (repented) mem.rp = true;
     }
     wallets.set(w, mem);
     pruneWallets();
 
+    // streaks and pressure
+    const st = state.streak;
+    if (st.t === e.type) st.n++; else { st.t = e.type; st.n = 1; }
+    if (st.n > state.best[e.type]) state.best[e.type] = st.n;
+    if (e.type === 'sell' && st.n === 3) quip('3 jeets in a row… the bat is thirsty.');
+    if (e.type === 'sell' && st.n === 5) quip('5 JEETS IN A ROW. I see you.');
+    if (e.type === 'buy' && st.n === 5) quip('5 knights in a row. The kingdom grows.');
+    if (e.type === 'buy' && st.n === 10) quip('10 KNIGHTS! THE ARMY MARCHES!');
+    state.pressure.push(e.type === 'buy' ? 'b' : 's');
+    if (state.pressure.length > 10) state.pressure.shift();
+
     pushFeed(e);
     renderStats();
+    renderPressure();
+    if (TABS[tabIdx].id !== 'live') renderBoards();
+    checkFrenzy(now);
     recent.push({ at: now, buy: e.type === 'buy', sol: amount });
     renderMeter();
     renderMarquee();
     save();
 
-    if (e.tier === 'knight') { growArmy(); knightSound(false); return; } // buys never block the queue
+    if (e.tier === 'knight') { growArmy(); knightSound(false); cometToFeed(e); return; } // buys never block the queue
     if (e.tier === 'whale') growArmy();
+    cometToFeed(e);
     queue.push(e);
     if (queue.length > 40) {
       const i = queue.findIndex((q) => q.tier === 'tap');
@@ -805,6 +974,7 @@
 
   // ---------- boot ----------
   render();
+  showTab(0);
   refreshSol();
   setInterval(refreshSol, 5 * 60e3);
   if (!CFG.demo) { refreshMcap(); setInterval(refreshMcap, 20000); }

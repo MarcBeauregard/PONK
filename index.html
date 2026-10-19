@@ -64,9 +64,20 @@
   <div class="bubble" id="bubble"><p id="bubble-text">PONK ALL JEETS.</p></div>
 
   <!-- live feed -->
-  <aside class="feed">
-    <h2>LIVE FROM THE KINGDOM</h2>
-    <ol id="feed"></ol>
+  <aside class="feed" id="feed-panel">
+    <div class="feed-head">
+      <div class="tabs" id="tabs">
+        <span data-tab="live">LIVE</span><span data-tab="shame">SHAME</span><span data-tab="fame">FAME</span><span data-tab="streaks">STREAKS</span>
+      </div>
+      <span class="frenzy-badge">FRENZY</span>
+    </div>
+    <div class="pressure"><span>PRESSURE</span><div class="chips" id="chips"></div></div>
+    <div class="views">
+      <div class="view on" data-view="live"><div class="pin" id="feed-pin"></div><ol id="feed"></ol></div>
+      <div class="view" data-view="shame"><h3>HALL OF SHAME <small>today</small></h3><ol class="board" id="shame"></ol></div>
+      <div class="view" data-view="fame"><h3>HALL OF FAME <small>today</small></h3><ol class="board" id="fame"></ol></div>
+      <div class="view" data-view="streaks"><h3>STREAKS <small>today</small></h3><div id="streaks"></div></div>
+    </div>
   </aside>
 
   <!-- hit layer: jeets fly in here -->
