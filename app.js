@@ -430,6 +430,7 @@
     }
     rollDay();
     lastTradeAt = Date.now();
+    DIAG.trades++; DIAG.lastTrade = lastTradeAt;
     if (tr.marketCapSol) { lastMcapSol = +tr.marketCapSol; renderMcap(); }
     soonMcap();
 
@@ -825,13 +826,34 @@
   }
   const log = (...a) => { if (CFG.debug) console.log('[ponk]', ...a); };
 
+  // ?debug=1 shows an on-screen health panel (source, socket, counters) so a screenshot says it all
+  const DIAG = { src: '-', socket: '-', msgs: 0, sigs: 0, decoded: 0, notTrade: 0, apiErr: 0, trades: 0, lastMsg: 0, lastTrade: 0, health: '-', err: '' };
+  if (CFG.debug) {
+    const box = document.createElement('pre');
+    box.style.cssText = 'position:absolute;left:24px;top:130px;z-index:40;margin:0;padding:14px 16px;border-radius:14px;background:rgba(0,0,0,.82);color:#9effa0;font:600 15px/1.45 ui-monospace,Menlo,Consolas,monospace;white-space:pre;border:1px solid #2ee66b';
+    stage.appendChild(box);
+    const ago = (t) => (t ? Math.round((Date.now() - t) / 1000) + 's ago' : 'never');
+    setInterval(() => {
+      box.textContent = [
+        'PONK DEBUG', `source      ${DIAG.src}`, `/api/health ${DIAG.health}`, `socket      ${DIAG.socket}`,
+        `messages    ${DIAG.msgs} (last ${ago(DIAG.lastMsg)})`, `tx seen     ${DIAG.sigs}`,
+        `decoded     ${DIAG.decoded} trades, ${DIAG.notTrade} not trades, ${DIAG.apiErr} api errors`,
+        `on screen   ${DIAG.trades} (last ${ago(DIAG.lastTrade)})`, `market cap  ${mcapUsd ? '$' + compact(mcapUsd) + ' (dexscreener)' : lastMcapSol ? 'from trades' : 'none yet'}`,
+        DIAG.err ? `last error  ${DIAG.err}` : '',
+      ].filter(Boolean).join('\n');
+    }, 1000);
+  }
+
   // One websocket at a time, with backoff reconnects and a watchdog for silent drops.
   function feed({ url, label, onOpen, onMessage, keepAlive, watchdogMs }) {
     let ws = null, lastMsgAt = 0, retry = 0, ka = 0;
     function open() {
       setStatus('', 'CONNECTING');
-      try { ws = new WebSocket(typeof url === 'function' ? url() : url); } catch { return again(); }
+      const u = typeof url === 'function' ? url() : url;
+      DIAG.src = label; DIAG.socket = 'connecting ' + u.replace(/\?.*$/, '');
+      try { ws = new WebSocket(u); } catch { return again(); }
       ws.onopen = () => {
+        DIAG.socket = 'open ' + u.replace(/\?.*$/, '');
         retry = 0;
         lastMsgAt = Date.now();
         onOpen(ws);
@@ -840,11 +862,12 @@
       };
       ws.onmessage = (m) => {
         lastMsgAt = Date.now();
+        DIAG.msgs++; DIAG.lastMsg = lastMsgAt;
         let d; try { d = JSON.parse(m.data); } catch { return; }
         log(d);
         onMessage(d);
       };
-      ws.onclose = () => again();
+      ws.onclose = (ev) => { DIAG.socket = `closed (code ${ev.code}), retrying`; again(); };
       ws.onerror = () => { try { ws.close(); } catch {} };
     }
     function again() {
@@ -877,15 +900,18 @@
   async function onSignature(sig) {
     if (pending.has(sig) || seen.has(sig)) return;
     pending.add(sig);
+    DIAG.sigs++;
     try {
       for (let i = 0; i < 6; i++) {
         const r = await fetch(`/api/tx/${sig}`).catch(() => null);
         if (r && r.status === 200) {
           const { trade } = await r.json();
           log('decoded', sig, trade);
+          if (trade) DIAG.decoded++; else DIAG.notTrade++;
           if (trade) onTrade(trade);
           return;
         }
+        if (!r || r.status >= 400) { DIAG.apiErr++; DIAG.err = `/api/tx ${r ? r.status : 'network'}`; }
         if (r && r.status !== 202 && r.status < 500) return;
         await sleep(800 * (i + 1));
       }
@@ -903,7 +929,7 @@
       })),
       onMessage: (d) => {
         if (d.id === 'ka') return; // keep-alive reply
-        if (d.error) { console.warn('[ponk] RPC:', d.error.message || d.error); return; }
+        if (d.error) { DIAG.err = 'RPC ' + (d.error.message || d.error); console.warn('[ponk] RPC:', d.error.message || d.error); return; }
         const v = d.method === 'logsNotification' && d.params?.result?.value;
         if (v && !v.err && v.signature) onSignature(v.signature);
       },
@@ -992,6 +1018,6 @@
   else {
     // use the Solana feed when the site's decoder is configured, PumpPortal otherwise
     fetch('/api/health').then((r) => (r.ok ? r.json() : {})).catch(() => ({}))
-      .then((h) => (h.ready ? connectChain() : connectPumpPortal()));
+      .then((h) => { DIAG.health = h.ready ? 'ready (key set)' : 'not ready -> PumpPortal'; return h.ready ? connectChain() : connectPumpPortal(); });
   }
 })();

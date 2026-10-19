@@ -32,7 +32,7 @@ export function parseTx(tx, signature, mint = MINT) {
   const dLamports = (tx.meta.postBalances[0] - tx.meta.preBalances[0] + tx.meta.fee) / 1e9;
   const dSol = dLamports + (bal(post, WSOL) - bal(pre, WSOL));
   const buy = dTok > 0;
-  if (buy ? dSol > 0 : dSol < 0) return null; // tokens and SOL moved the same way: a transfer, not a swap
+  if (buy ? dSol >= 0 : dSol <= 0) return null; // no SOL moved the other way: a transfer, not a swap
   let solAmount = Math.abs(dSol);
   if (buy && !pre.some((b) => b.mint === mint && b.owner === signer)) solAmount = Math.max(0, solAmount - ATA_RENT);
   return {
