@@ -14,7 +14,7 @@
     ws: 'wss://pumpportal.fun/api/data',
     chainWs: params.get('ws') ? [params.get('ws')] : ['wss://api.mainnet-beta.solana.com', 'wss://solana-rpc.publicnode.com'],
     source: params.get('source'),
-    minSol: parseFloat(params.get('min') ?? '0.005'), // ignore dust trades below this
+    minSol: parseFloat(params.get('min') ?? '0.001'), // ignore dust trades below this
     debug: params.has('debug'),
     demo: params.has('demo'),
     mute: params.has('mute'),
@@ -45,7 +45,7 @@
   // ---------- helpers ----------
   function clamp(n, a, b) { return Number.isFinite(n) ? Math.min(b, Math.max(a, n)) : b; }
   const short = (w) => (w && w.length > 10 ? `${w.slice(0, 4)}…${w.slice(-4)}` : w || '????');
-  const sol = (n) => (n >= 100 ? n.toFixed(0) : n >= 10 ? n.toFixed(1) : n.toFixed(2));
+  const sol = (n) => (n >= 100 ? n.toFixed(0) : n >= 10 ? n.toFixed(1) : n >= 0.01 || n === 0 ? n.toFixed(2) : n.toFixed(3));
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const todayKey = () => new Date().toLocaleDateString('en-CA');
   const esc = (s) => String(s).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
@@ -827,7 +827,7 @@
   const log = (...a) => { if (CFG.debug) console.log('[ponk]', ...a); };
 
   // ?debug=1 shows an on-screen health panel (source, socket, counters) so a screenshot says it all
-  const DIAG = { src: '-', socket: '-', msgs: 0, sigs: 0, decoded: 0, notTrade: 0, apiErr: 0, trades: 0, lastMsg: 0, lastTrade: 0, health: '-', err: '' };
+  const DIAG = { src: '-', socket: '-', poll: '-', msgs: 0, sigs: 0, decoded: 0, notTrade: 0, apiErr: 0, trades: 0, lastMsg: 0, lastTrade: 0, health: '-', err: '' };
   if (CFG.debug) {
     const box = document.createElement('pre');
     box.style.cssText = 'position:absolute;left:24px;top:130px;z-index:40;margin:0;padding:14px 16px;border-radius:14px;background:rgba(0,0,0,.82);color:#9effa0;font:600 15px/1.45 ui-monospace,Menlo,Consolas,monospace;white-space:pre;border:1px solid #2ee66b';
@@ -835,7 +835,7 @@
     const ago = (t) => (t ? Math.round((Date.now() - t) / 1000) + 's ago' : 'never');
     setInterval(() => {
       box.textContent = [
-        'PONK DEBUG', `source      ${DIAG.src}`, `/api/health ${DIAG.health}`, `socket      ${DIAG.socket}`,
+        'PONK DEBUG', `source      ${DIAG.src}`, `/api/health ${DIAG.health}`, `socket      ${DIAG.socket}`, `server poll ${DIAG.poll}`,
         `messages    ${DIAG.msgs} (last ${ago(DIAG.lastMsg)})`, `tx seen     ${DIAG.sigs}`,
         `decoded     ${DIAG.decoded} trades, ${DIAG.notTrade} not trades, ${DIAG.apiErr} api errors`,
         `on screen   ${DIAG.trades} (last ${ago(DIAG.lastTrade)})`, `market cap  ${mcapUsd ? '$' + compact(mcapUsd) + ' (dexscreener)' : lastMcapSol ? 'from trades' : 'none yet'}`,
@@ -844,20 +844,27 @@
     }, 1000);
   }
 
-  // One websocket at a time, with backoff reconnects and a watchdog for silent drops.
+  // Several feeds can run at once; the badge says LIVE while at least one socket is open.
+  const openFeeds = new Set();
+  function feedState(label, open) {
+    if (open) openFeeds.add(label); else openFeeds.delete(label);
+    if (openFeeds.size) setStatus('live', 'LIVE ON SOLANA');
+    else setStatus('', 'RECONNECTING');
+  }
+
+  // One websocket per feed, with backoff reconnects and a watchdog for silent drops.
   function feed({ url, label, onOpen, onMessage, keepAlive, watchdogMs }) {
     let ws = null, lastMsgAt = 0, retry = 0, ka = 0;
     function open() {
-      setStatus('', 'CONNECTING');
       const u = typeof url === 'function' ? url() : url;
-      DIAG.src = label; DIAG.socket = 'connecting ' + u.replace(/\?.*$/, '');
+      DIAG.socket = 'connecting ' + u.replace(/\?.*$/, '');
       try { ws = new WebSocket(u); } catch { return again(); }
       ws.onopen = () => {
         DIAG.socket = 'open ' + u.replace(/\?.*$/, '');
         retry = 0;
         lastMsgAt = Date.now();
         onOpen(ws);
-        setStatus('live', `LIVE · ${label}`);
+        feedState(label, true);
         if (keepAlive) ka = setInterval(() => { try { ws.send(keepAlive); } catch {} }, 50000);
       };
       ws.onmessage = (m) => {
@@ -873,7 +880,7 @@
     function again() {
       clearInterval(ka);
       if (ws) { ws.onclose = ws.onerror = ws.onmessage = null; try { ws.close(); } catch {} ws = null; }
-      setStatus('', 'RECONNECTING');
+      feedState(label, false);
       setTimeout(open, Math.min(30000, 1000 * 2 ** retry++));
     }
     setInterval(() => {
@@ -919,11 +926,35 @@
       setTimeout(() => pending.delete(sig), 60000);
     }
   }
+  // Safety net: every 20 s ask the server for the latest transactions on the mint and decode the new ones.
+  // The first answer only marks what already happened, so old trades don't replay on load.
+  function pollRecent() {
+    const known = new Set();
+    let first = true;
+    async function tick() {
+      try {
+        const r = await fetch('/api/recent');
+        if (!r.ok) throw new Error('/api/recent ' + r.status);
+        const { signatures = [] } = await r.json();
+        let fresh = 0;
+        for (const sig of signatures.slice().reverse()) { // oldest first
+          if (known.has(sig)) continue;
+          known.add(sig);
+          if (!first && !seen.has(sig)) { fresh++; onSignature(sig); }
+        }
+        if (known.size > 500) known.clear();
+        DIAG.poll = `ok ${new Date().toLocaleTimeString()}${first ? ' (baseline)' : `, ${fresh} new`}`;
+        first = false;
+      } catch (err) { DIAG.poll = 'error: ' + err.message; }
+    }
+    tick();
+    setInterval(tick, 20000);
+  }
+
   function connectChain() {
     let n = 0; // rotate public endpoints when one drops us
     feed({
       url: () => CFG.chainWs[n++ % CFG.chainWs.length], label: 'SOLANA', watchdogMs: 5 * 60e3,
-      keepAlive: JSON.stringify({ jsonrpc: '2.0', id: 'ka', method: 'getHealth' }), // providers drop idle sockets
       onOpen: (ws) => ws.send(JSON.stringify({
         jsonrpc: '2.0', id: 1, method: 'logsSubscribe', params: [{ mentions: [CFG.mint] }, { commitment: 'confirmed' }],
       })),
@@ -1014,10 +1045,20 @@
     window.ponkTrade = onTrade; // lets a recording script drive the page
     if (params.get('demo') === 'manual') setStatus('demo', 'DEMO MODE'); else demo();
   }
-  else if (CFG.source === 'pumpportal') connectPumpPortal();
   else {
-    // use the Solana feed when the site's decoder is configured, PumpPortal otherwise
-    fetch('/api/health').then((r) => (r.ok ? r.json() : {})).catch(() => ({}))
-      .then((h) => { DIAG.health = h.ready ? 'ready (key set)' : 'not ready -> PumpPortal'; return h.ready ? connectChain() : connectPumpPortal(); });
+    // PumpPortal always (free, pump.fun trades); plus the Solana feed and the server safety net when the key is set.
+    // A trade seen by several sources shows once (deduplicated by signature).
+    DIAG.src = 'PUMPPORTAL';
+    connectPumpPortal();
+    if (CFG.source !== 'pumpportal') {
+      fetch('/api/health').then((r) => (r.ok ? r.json() : {})).catch(() => ({}))
+        .then((h) => {
+          DIAG.health = h.ready ? 'ready (key set)' : 'not ready';
+          if (!h.ready) return;
+          DIAG.src = 'PUMPPORTAL + SOLANA + SERVER POLL';
+          connectChain();
+          pollRecent();
+        });
+    }
   }
 })();
