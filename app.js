@@ -837,7 +837,7 @@
     const ago = (t) => (t ? Math.round((Date.now() - t) / 1000) + 's ago' : 'never');
     setInterval(() => {
       box.textContent = [
-        'PONK DEBUG', `source      ${DIAG.src}`, `/api/health ${DIAG.health}`, `socket      ${DIAG.socket}`, `server poll ${DIAG.poll}`,
+        'PONK DEBUG', `source      ${DIAG.src}`, `/api/health ${DIAG.health}`, `socket      ${DIAG.socket}`, `chain poll  ${DIAG.poll}`,
         `messages    ${DIAG.msgs} (last ${ago(DIAG.lastMsg)})`, `tx seen     ${DIAG.sigs}`,
         `decoded     ${DIAG.decoded} trades, ${DIAG.notTrade} not trades, ${DIAG.apiErr} api errors`,
         `on screen   ${DIAG.trades} (last ${ago(DIAG.lastTrade)})`, `market cap  ${mcapUsd ? '$' + compact(mcapUsd) + ' (' + (DIAG.mcapSrc || 'saved') + ')' : lastMcapSol ? 'from trades' : 'none yet'}`,
@@ -849,11 +849,17 @@
   // Several feeds can run at once. The badge says LIVE only once a feed has confirmed its subscription
   // (or a real trade arrived), not merely because a socket opened.
   const openFeeds = new Set();
-  function feedState(label, open) {
-    if (open) openFeeds.add(label); else openFeeds.delete(label);
-    if (openFeeds.size) setStatus('live', 'LIVE ON SOLANA');
+  let pollOkAt = 0; // last successful poll of the chain (see pollRecent)
+  function updateStatus() {
+    if (CFG.demo) return;
+    if (openFeeds.size || Date.now() - pollOkAt < 60000) setStatus('live', 'LIVE ON SOLANA');
     else setStatus('', 'RECONNECTING');
   }
+  function feedState(label, open) {
+    if (open) openFeeds.add(label); else openFeeds.delete(label);
+    updateStatus();
+  }
+  setInterval(updateStatus, 10000);
 
   // One websocket per feed, with backoff reconnects and a watchdog for silent drops.
   function feed({ url, label, onOpen, onMessage, keepAlive, watchdogMs }) {
@@ -935,16 +941,35 @@
       setTimeout(() => pending.delete(sig), 60000);
     }
   }
-  // Safety net: every 20 s ask the server for the latest transactions on the mint and decode the new ones.
+  // Polling, independent of any websocket: every 5 s ask the public Solana RPC (plain HTTP, no key) for the
+  // latest transactions on the mint, and decode the new ones through /api/tx. If the public RPC refuses,
+  // fall back to the site's own /api/recent (Helius, server-side) every 20 s.
   // The first answer only marks what already happened, so old trades don't replay on load.
+  const PUBLIC_RPC = params.get('rpc') || 'https://api.mainnet-beta.solana.com';
+  async function latestSignatures() {
+    try {
+      const r = await fetch(PUBLIC_RPC, {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'getSignaturesForAddress', params: [CFG.mint, { limit: 25, commitment: 'confirmed' }] }),
+      });
+      const j = await r.json();
+      if (j.error || !Array.isArray(j.result)) throw new Error(j.error ? j.error.message : 'bad answer');
+      return { via: 'public rpc', signatures: j.result.filter((x) => !x.err).map((x) => x.signature) };
+    } catch (err) {
+      DIAG.err = 'public rpc: ' + err.message;
+      const r = await fetch('/api/recent');
+      if (!r.ok) throw new Error('/api/recent ' + r.status);
+      return { via: 'server', slow: true, ...(await r.json()) };
+    }
+  }
   function pollRecent() {
     const known = new Set();
     let first = true;
     async function tick() {
+      let wait = 5000;
       try {
-        const r = await fetch('/api/recent');
-        if (!r.ok) throw new Error('/api/recent ' + r.status);
-        const { signatures = [] } = await r.json();
+        const { signatures = [], via, slow } = await latestSignatures();
+        if (slow) wait = 20000;
         let fresh = 0;
         for (const sig of signatures.slice().reverse()) { // oldest first
           if (known.has(sig)) continue;
@@ -952,12 +977,14 @@
           if (!first && !seen.has(sig)) { fresh++; onSignature(sig); }
         }
         if (known.size > 500) known.clear();
-        DIAG.poll = `ok ${new Date().toLocaleTimeString()}${first ? ' (baseline)' : `, ${fresh} new`}`;
+        DIAG.poll = `ok via ${via} ${new Date().toLocaleTimeString()}${first ? ' (baseline)' : `, ${fresh} new`}`;
         first = false;
-      } catch (err) { DIAG.poll = 'error: ' + err.message; }
+        pollOkAt = Date.now();
+        updateStatus();
+      } catch (err) { DIAG.poll = 'error: ' + err.message; wait = 20000; }
+      setTimeout(tick, wait);
     }
     tick();
-    setInterval(tick, 20000);
   }
 
   function connectChain() {
