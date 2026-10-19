@@ -12,7 +12,7 @@
   const CFG = {
     mint: params.get('mint') || '4jjQjDRYd7xLcFMViRsz4GvtgU6gPZgbVaxN3Rq9pump',
     ws: 'wss://pumpportal.fun/api/data',
-    chainWs: params.get('ws') ? [params.get('ws')] : ['wss://api.mainnet-beta.solana.com', 'wss://solana-rpc.publicnode.com'],
+    chainWs: params.get('ws') ? [params.get('ws')] : ['wss://api.mainnet-beta.solana.com'],
     source: params.get('source'),
     minSol: parseFloat(params.get('min') ?? '0.001'), // ignore dust trades below this
     debug: params.has('debug'),
@@ -430,6 +430,7 @@
     }
     rollDay();
     lastTradeAt = Date.now();
+    if (!CFG.demo) setStatus('live', 'LIVE ON SOLANA'); // a real trade made it through, whichever source carried it
     DIAG.trades++; DIAG.lastTrade = lastTradeAt;
     if (tr.marketCapSol) { lastMcapSol = +tr.marketCapSol; renderMcap(); }
     if (!CFG.demo) mcapFromTrade(tr);
@@ -845,7 +846,8 @@
     }, 1000);
   }
 
-  // Several feeds can run at once; the badge says LIVE while at least one socket is open.
+  // Several feeds can run at once. The badge says LIVE only once a feed has confirmed its subscription
+  // (or a real trade arrived), not merely because a socket opened.
   const openFeeds = new Set();
   function feedState(label, open) {
     if (open) openFeeds.add(label); else openFeeds.delete(label);
@@ -865,7 +867,7 @@
         retry = 0;
         lastMsgAt = Date.now();
         onOpen(ws);
-        feedState(label, true);
+        DIAG.socket = 'open, waiting for subscription ack';
         if (keepAlive) ka = setInterval(() => { try { ws.send(keepAlive); } catch {} }, 50000);
       };
       ws.onmessage = (m) => {
@@ -873,7 +875,7 @@
         DIAG.msgs++; DIAG.lastMsg = lastMsgAt;
         let d; try { d = JSON.parse(m.data); } catch { return; }
         log(d);
-        onMessage(d);
+        onMessage(d, () => { feedState(label, true); DIAG.socket = 'subscribed ' + u.replace(/\?.*$/, ''); });
       };
       ws.onclose = (ev) => { DIAG.socket = `closed (code ${ev.code}), retrying`; again(); };
       ws.onerror = () => { try { ws.close(); } catch {} };
@@ -895,8 +897,14 @@
     feed({
       url: CFG.ws, label: 'PUMPPORTAL', watchdogMs: CFG.watchdogMs,
       onOpen: (ws) => ws.send(JSON.stringify({ method: 'subscribeTokenTrade', keys: [CFG.mint] })),
-      onMessage: (d) => {
-        if (d.errors || d.error) { console.warn('[ponk] PumpPortal:', d.errors || d.error); return; }
+      onMessage: (d, ack) => {
+        if (d.errors || d.error) { DIAG.err = 'PumpPortal ' + (d.errors || d.error); console.warn('[ponk] PumpPortal:', d.errors || d.error); return; }
+        if (d.message && !d.txType) { // PumpPortal answers in a "message" field: an ack, or an error (e.g. API key / balance)
+          if (/success/i.test(d.message)) ack();
+          else { DIAG.err = 'PumpPortal: ' + d.message; console.warn('[ponk] PumpPortal:', d.message); }
+          return;
+        }
+        if (d.txType) ack();
         onTrade(d);
       },
     });
@@ -959,8 +967,9 @@
       onOpen: (ws) => ws.send(JSON.stringify({
         jsonrpc: '2.0', id: 1, method: 'logsSubscribe', params: [{ mentions: [CFG.mint] }, { commitment: 'confirmed' }],
       })),
-      onMessage: (d) => {
+      onMessage: (d, ack) => {
         if (d.id === 'ka') return; // keep-alive reply
+        if (d.id === 1 && typeof d.result === 'number') { ack(); return; } // logsSubscribe confirmed
         if (d.error) { DIAG.err = 'RPC ' + (d.error.message || d.error); console.warn('[ponk] RPC:', d.error.message || d.error); return; }
         const v = d.method === 'logsNotification' && d.params?.result?.value;
         if (v && !v.err && v.signature) onSignature(v.signature);
@@ -1073,16 +1082,15 @@
     if (params.get('demo') === 'manual') setStatus('demo', 'DEMO MODE'); else demo();
   }
   else {
-    // PumpPortal always (free, pump.fun trades); plus the Solana feed and the server safety net when the key is set.
-    // A trade seen by several sources shows once (deduplicated by signature).
-    DIAG.src = 'PUMPPORTAL';
-    connectPumpPortal();
-    if (CFG.source !== 'pumpportal') {
+    // With the Helius key set: the Solana feed plus the server safety net (deduplicated by signature).
+    // PumpPortal now requires a funded API key, so it is only a fallback without the key, or with ?source=pumpportal.
+    if (CFG.source === 'pumpportal') { DIAG.src = 'PUMPPORTAL'; connectPumpPortal(); }
+    else {
       fetch('/api/health').then((r) => (r.ok ? r.json() : {})).catch(() => ({}))
         .then((h) => {
-          DIAG.health = h.ready ? 'ready (key set)' : 'not ready';
-          if (!h.ready) return;
-          DIAG.src = 'PUMPPORTAL + SOLANA + SERVER POLL';
+          DIAG.health = h.ready ? 'ready (key set)' : 'not ready -> PumpPortal';
+          if (!h.ready) { DIAG.src = 'PUMPPORTAL'; connectPumpPortal(); return; }
+          DIAG.src = 'SOLANA + SERVER POLL';
           connectChain();
           pollRecent();
         });

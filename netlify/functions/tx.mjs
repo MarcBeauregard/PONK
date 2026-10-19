@@ -48,7 +48,7 @@ async function getTransaction(sig, key) {
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
       jsonrpc: '2.0', id: 1, method: 'getTransaction',
-      params: [sig, { encoding: 'jsonParsed', maxSupportedTransactionVersion: 0, commitment: 'confirmed' }],
+      params: [sig, { encoding: 'jsonParsed', maxSupportedTransactionVersion: 1, commitment: 'confirmed' }],
     }),
   });
   const j = await r.json();
@@ -67,6 +67,8 @@ export default async (req, context) => {
       if (tx) return json(200, { trade: parseTx(tx, sig) }, true);
     } catch (err) {
       console.error('getTransaction', sig, err.message);
+      // a permanent refusal (e.g. an unsupported transaction version) must not look like "not indexed yet"
+      if (/version|not supported|invalid/i.test(err.message)) return json(502, { error: err.message });
     }
     await new Promise((r) => setTimeout(r, 600));
   }
