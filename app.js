@@ -668,7 +668,7 @@
       const p = lerp(k);
       return { transform: `translate(${p.x}px,${p.y - (i % 2 ? 26 : 0)}px) rotate(${i === 4 || i % 2 ? -8 : 8}deg)` };
     });
-    const approach = el.animate(frames, { duration: 800 * speed, easing: 'cubic-bezier(.25,.7,.35,1)', fill: 'forwards' });
+    const approach = el.animate(frames, { duration: 800 * speed, easing: 'cubic-bezier(.4,.25,.6,1)', fill: 'forwards' });
 
     // 2. he winds up, then swings so the bat lands exactly as the jeet arrives
     const dur = 800 * speed;
