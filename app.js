@@ -114,11 +114,15 @@
     })(t0);
   }
   const int = (n) => String(Math.round(n));
+  // Market cap: DexScreener's figure (USD) when we have it; otherwise estimated from the last trade's price.
   let solUsd = 0;
   let lastMcapSol = 0;
+  let mcapUsd = 0;
+  if (!CFG.demo) try { mcapUsd = +localStorage.getItem(STORE + ':mcap') || 0; } catch {}
   function renderMcap() {
-    if (!lastMcapSol) return;
-    $('s-mcap').textContent = solUsd ? `$${compact(lastMcapSol * solUsd)}` : `${compact(lastMcapSol)} SOL`;
+    const el = $('s-mcap');
+    if (mcapUsd) el.textContent = `$${compact(mcapUsd)}`;
+    else if (lastMcapSol) el.textContent = solUsd ? `$${compact(lastMcapSol * solUsd)}` : `${compact(lastMcapSol)} SOL`;
   }
   function renderStats() {
     setStat('s-jeets', state.jeets, int);
@@ -307,6 +311,7 @@
     rollDay();
     lastTradeAt = Date.now();
     if (tr.marketCapSol) { lastMcapSol = +tr.marketCapSol; renderMcap(); }
+    soonMcap();
 
     const now = Date.now();
     const w = tr.traderPublicKey;
@@ -736,7 +741,34 @@
     });
   }
 
-  // SOL price for the market cap in USD (optional; falls back to SOL)
+  // Market cap from DexScreener (covers the pump.fun curve and PumpSwap). Straight from the browser,
+  // or through /api/mcap (netlify/functions/mcap.mjs) if the browser can't reach it.
+  function pickMcap(j) {
+    const pairs = (j && j.pairs || []).filter((p) => p.baseToken && p.baseToken.address === CFG.mint);
+    if (!pairs.length) return 0;
+    pairs.sort((a, b) => ((b.liquidity && b.liquidity.usd) || 0) - ((a.liquidity && a.liquidity.usd) || 0));
+    return +(pairs[0].marketCap || pairs[0].fdv) || 0;
+  }
+  async function refreshMcap() {
+    let v = 0;
+    try {
+      v = pickMcap(await (await fetch(`https://api.dexscreener.com/latest/dex/tokens/${CFG.mint}`)).json());
+    } catch (err) { log('dexscreener', err.message); }
+    if (!v && !CFG.demo) {
+      try { v = +(await (await fetch('/api/mcap')).json()).marketCap || 0; } catch {}
+    }
+    if (!v) return;
+    mcapUsd = v;
+    try { localStorage.setItem(STORE + ':mcap', String(v)); } catch {}
+    renderMcap();
+  }
+  let mcapTimer = 0;
+  function soonMcap() { // a trade just moved the price: refresh a few seconds later, once
+    if (CFG.demo || mcapTimer) return;
+    mcapTimer = setTimeout(() => { mcapTimer = 0; refreshMcap(); }, 4000);
+  }
+
+  // SOL price, only for the trade-based estimate when DexScreener is unavailable
   async function refreshSol() {
     try {
       const r = await fetch('https://api.coingecko.com/api/v3/simple/price?ids=solana&vs_currencies=usd');
@@ -775,6 +807,7 @@
   render();
   refreshSol();
   setInterval(refreshSol, 5 * 60e3);
+  if (!CFG.demo) { refreshMcap(); setInterval(refreshMcap, 20000); }
   setInterval(rollDay, 60e3);
   setTimeout(function reload() {
     if (busy || queue.length) return setTimeout(reload, 10000);
